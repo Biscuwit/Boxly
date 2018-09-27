@@ -4,6 +4,7 @@
 #include "BLEDevice.h"
 #include "BLEServer.h"
 #include "BLEUtils.h"
+#include "driver/rtc_io.h"
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -16,9 +17,8 @@ int pinValue;
 bool locked;
 volatile byte state = LOW;
 int timeoutTimer = 0;
-const int SPEAKER = 25;     // I25
-const int STATUS_LOCK = 14; // I14
-const int RELAY = 27;       // I32
+const int LOCK = 26;  // I25
+const int LIGHT = 27; // I32
 stringstream tempMsg;
 string rxValue; // Recevied string from connected device
 
@@ -27,8 +27,7 @@ string rxValue; // Recevied string from connected device
 #define SERVICE_UUID "6E400001-B5A3-F393-E0A9-E50E24DCCA9E" // UART service UUID
 #define CHARACTERISTIC_UUID_RX "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
 #define CHARACTERISTIC_UUID_TX "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define FIRST_PULSE 1550  // Pulse length for lock in ms
-#define NORMAL_PULSE 1550 // Pulse length for lock in ms
+#define NORMAL_PULSE 1450 // Pulse length for lock in ms
 
 void pulse(int pinNumber) {
   digitalWrite(pinNumber, HIGH);
@@ -44,7 +43,7 @@ void setLockStatus() {
 
 void warn() {
   int timer = 0;
-  digitalWrite(SPEAKER, HIGH);
+  digitalWrite(LIGHT, HIGH);
   while (timer < 10) {
     if (locked) {
       break;
@@ -52,7 +51,7 @@ void warn() {
     delay(1000);
     timer++;
   }
-  digitalWrite(SPEAKER, LOW);
+  digitalWrite(LIGHT, LOW);
 }
 
 void print_wakeup_reason() {
@@ -84,7 +83,7 @@ class MyServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *pServer) {
     timeoutTimer = 0;
     deviceConnected = true;
-    pulse(RELAY);
+    pulse(LOCK);
     // Serial.println(locked);
   };
 
@@ -99,21 +98,26 @@ class MyCallbacks : public BLECharacteristicCallbacks {
       // Unlocks door if value retrived is "A"
       if (rxValue.find("A") != -1) {
         // Serial.println("Jag kom hit");
-        pulse(RELAY);
+        pulse(LOCK);
       }
     }
   }
 };
 
 void setup() {
+  rtc_gpio_init(GPIO_NUM_25);
+  rtc_gpio_pullup_dis(GPIO_NUM_25);
+  rtc_gpio_pulldown_en(GPIO_NUM_25);
+  rtc_gpio_set_direction(GPIO_NUM_25, RTC_GPIO_MODE_INPUT_ONLY);
   Serial.begin(115200);
-  pinMode(STATUS_LOCK, INPUT);
-  pinMode(RELAY, OUTPUT);
-  pinMode(SPEAKER, OUTPUT);
+  pinMode(LOCK, OUTPUT);
+  pinMode(LIGHT, OUTPUT);
+  digitalWrite(LIGHT, 1);
   // Sets interupt pin and mode
   // attachInterrupt(digitalPinToInterrupt(STATUS_LOCK), setLockStatus, CHANGE);
   // Enable deepsleep
-  esp_sleep_enable_ext0_wakeup(GPIO_NUM_32, 1); // 1 = High, 0 = Low
+
+  esp_sleep_enable_ext0_wakeup(GPIO_NUM_25, 1); // 1 = High, 0 = Low
   // Create the BLE Device
   BLEDevice::init("Boxly"); // Give it a name
   // Create the BLE Server
@@ -132,6 +136,7 @@ void setup() {
   pService->start();
   // Start advertising
   pServer->getAdvertising()->start();
+  Serial.println(rtc_gpio_is_valid_gpio(GPIO_NUM_25));
   Serial.println("Waiting for connection... PlatformIO");
 }
 // It would be good to add a condtition to only notify when a change has
@@ -139,8 +144,9 @@ void setup() {
 // Preferably at the first if-statment!
 void loop() {
   timeoutTimer++;
-  if (timeoutTimer == 180) {
-    Serial.println("Going to sleep");
+  // Serial.println(rtc_gpio_get_level(GPIO_NUM_25));
+  if (timeoutTimer == 300) {
+    // Serial.println("Going to sleep");
     delay(1000);
     esp_deep_sleep_start();
   }
